@@ -14,6 +14,13 @@ import (
 	"time"
 )
 
+const (
+	LevelDebug = "debug"
+	LevelInfo  = "info"
+	LevelError = "error"
+	LevelFatal = "fatal"
+)
+
 type ctxKey string
 
 // Log
@@ -31,6 +38,7 @@ type encodeError struct {
 	Error   string `json:"error"`
 	Msg     string `json:"msg"`
 	OrigMsg string `json:"orig-msg"`
+	Level   string `json:"level"`
 }
 
 // New creates new Log instance which prints messages to stderr.
@@ -48,6 +56,7 @@ func New() *Log {
 func (l *Log) SetDebugGlobal(v bool) {
 	if v {
 		atomic.StoreInt32(l.debug, 1)
+		return
 	}
 
 	atomic.StoreInt32(l.debug, 0)
@@ -61,34 +70,32 @@ func (l *Log) SetDebug(ctx context.Context, v bool) context.Context {
 // Debug prints message with level=debug only if debug is enabled.
 func (l *Log) Debug(ctx context.Context, msg string) {
 	debug, ok := ctx.Value(l.ctxKeyDebug).(bool)
-	if !ok {
+	if ok {
+		if !debug {
+			return
+		}
+	} else {
 		if atomic.LoadInt32(l.debug) == 0 {
 			return
 		}
-	} else if !debug {
-		return
 	}
 
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	l.print(ctx, "debug", now, msg)
+	l.print(ctx, LevelDebug, msg)
 }
 
 // Info prints message msg with level=info.
 func (l *Log) Info(ctx context.Context, msg string) {
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	l.print(ctx, "info", now, msg)
+	l.print(ctx, LevelInfo, msg)
 }
 
 // Error prints message msg with level=error.
 func (l *Log) Error(ctx context.Context, msg string) {
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	l.print(ctx, "error", now, msg)
+	l.print(ctx, LevelError, msg)
 }
 
 // Fatal prints message msg with level=fatal and calls os.Exit(1).
 func (l *Log) Fatal(ctx context.Context, msg string) {
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	l.print(ctx, "fatal", now, msg)
+	l.print(ctx, LevelFatal, msg)
 	os.Exit(1)
 }
 
@@ -98,7 +105,36 @@ var bufPool = sync.Pool{
 	},
 }
 
-func (l *Log) print(ctx context.Context, level, timeStr, msg string) {
+func (l *Log) print(ctx context.Context, level, msg string) {
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if err := l.write(ctx, level, now, msg); err != nil {
+		f := ""
+		_, file, line, ok := runtime.Caller(2)
+		if ok {
+			f = fmt.Sprintf("%v:%v", file, line)
+		}
+
+		buf := bufPool.Get().(*bytes.Buffer)
+		defer bufPool.Put(buf)
+		buf.Reset()
+
+		encErr := encodeError{
+			Time:    now,
+			Error:   err.Error(),
+			File:    f,
+			Msg:     "ctxlog: json encode error",
+			OrigMsg: msg,
+			Level:   LevelError,
+		}
+		if err := json.NewEncoder(buf).Encode(encErr); err != nil {
+			panic(err)
+		}
+
+		_, _ = l.output.Write(buf.Bytes())
+	}
+}
+
+func (l *Log) write(ctx context.Context, level, timeStr, msg string) error {
 	fields, _ := ctx.Value(l.ctxKeyFields).(map[string]interface{})
 
 	logFields := make(map[string]interface{}, len(fields)+2)
@@ -119,30 +155,15 @@ func (l *Log) print(ctx context.Context, level, timeStr, msg string) {
 	buf.Reset()
 
 	if err := json.NewEncoder(buf).Encode(logFields); err != nil {
-		buf.Reset()
-
-		f := ""
-		_, file, line, ok := runtime.Caller(2)
-		if ok {
-			f = fmt.Sprintf("%v:%v", file, line)
-		}
-		encErr := encodeError{
-			Time:    timeStr,
-			Error:   err.Error(),
-			File:    f,
-			Msg:     "ctxlog: json encode error",
-			OrigMsg: msg,
-		}
-		if err := json.NewEncoder(buf).Encode(encErr); err != nil {
-			panic(err)
-		}
+		return err
 	}
 
 	_, _ = l.output.Write(buf.Bytes())
+	return nil
 }
 
 // AddFields returns new context with specified log fields added to it.
-func (l *Log) AddFields(ctx context.Context, newFields map[string]interface{}) context.Context {
+func (l *Log) WithFields(ctx context.Context, newFields map[string]interface{}) context.Context {
 	var fields map[string]interface{}
 	oldFields, ok := ctx.Value(l.ctxKeyFields).(map[string]interface{})
 	if ok {
@@ -162,10 +183,10 @@ func (l *Log) AddFields(ctx context.Context, newFields map[string]interface{}) c
 
 // WithField returns new context with specified log field added to it.
 func (l *Log) WithField(ctx context.Context, key string, value interface{}) context.Context {
-	return l.AddFields(ctx, map[string]interface{}{key: value})
+	return l.WithFields(ctx, map[string]interface{}{key: value})
 }
 
 // WithField returns new context with error field added to it.
 func (l *Log) WithError(ctx context.Context, err error) context.Context {
-	return l.AddFields(ctx, map[string]interface{}{"error": err})
+	return l.WithFields(ctx, map[string]interface{}{"error": err})
 }

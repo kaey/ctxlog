@@ -3,8 +3,8 @@ package ctxlog_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
-	"regexp"
 	"testing"
 
 	"github.com/kaey/ctxlog"
@@ -18,7 +18,9 @@ func TestLog(t *testing.T) {
 
 	t.Run("PrintInfo", func(t *testing.T) {
 		buf.Reset()
-		log.Print(ctx, "info", "now", "foo")
+		if err := log.Write(ctx, "info", "now", "foo"); err != nil {
+			t.Errorf("unexpected error from print: %v", err)
+		}
 
 		expected := `{"level":"info","msg":"foo","time":"now"}` + "\n"
 		got := buf.String()
@@ -30,7 +32,9 @@ func TestLog(t *testing.T) {
 	t.Run("WithError", func(t *testing.T) {
 		buf.Reset()
 		ctx = log.WithError(ctx, fmt.Errorf("bar error"))
-		log.Print(ctx, "error", "now", "bar")
+		if err := log.Write(ctx, "error", "now", "bar"); err != nil {
+			t.Errorf("unexpected error from print: %v", err)
+		}
 
 		expected := `{"error":"bar error","level":"error","msg":"bar","time":"now"}` + "\n"
 		got := buf.String()
@@ -42,11 +46,28 @@ func TestLog(t *testing.T) {
 	t.Run("EncodeError", func(t *testing.T) {
 		buf.Reset()
 		ctx = log.WithField(ctx, "chan", make(chan string))
-		log.Print(ctx, "info", "now", "chan")
+		if err := log.Write(ctx, "info", "now", "chan"); err == nil {
+			t.Errorf("expected error from print, got nil")
+		}
+	})
 
-		// Log will also contain file name and line where log was called, this field is cut here.
-		expected := `{"time":"now","error":"json: unsupported type: chan string","msg":"ctxlog: json encode error","orig-msg":"chan"}` + "\n"
-		got := regexp.MustCompile(`"file":".*?",`).ReplaceAllString(buf.String(), "")
+	t.Run("EncodeErrorMarshal", func(t *testing.T) {
+		buf.Reset()
+		err := ctxlog.EncodeError{
+			Time:    "now",
+			Error:   "foo err",
+			File:    "some file",
+			Msg:     "encode error",
+			OrigMsg: "original msg",
+			Level:   ctxlog.LevelError,
+		}
+
+		if err := json.NewEncoder(buf).Encode(err); err != nil {
+			t.Errorf("unexpected error from json.Encode: %v", err)
+		}
+
+		expected := `{"time":"now","file":"some file","error":"foo err","msg":"encode error","orig-msg":"original msg","level":"error"}` + "\n"
+		got := buf.String()
 		if expected != got {
 			t.Errorf("expected: %v, got: %v", expected, got)
 		}
