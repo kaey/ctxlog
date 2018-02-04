@@ -65,11 +65,19 @@ func (l *Log) SetDebugGlobal(v bool) {
 
 // SetDebug returns new context with enabled/disabled debug messages. Overrides global debug flag.
 func (l *Log) SetDebug(ctx context.Context, v bool) context.Context {
+	if l == nil {
+		return ctx
+	}
+
 	return context.WithValue(ctx, l.ctxKeyDebug, v)
 }
 
 // Debug prints message with level=debug only if debug is enabled.
 func (l *Log) Debug(ctx context.Context, msg string) {
+	if l == nil {
+		return
+	}
+
 	debug, ok := ctx.Value(l.ctxKeyDebug).(bool)
 	if ok {
 		if !debug {
@@ -86,16 +94,29 @@ func (l *Log) Debug(ctx context.Context, msg string) {
 
 // Info prints message msg with level=info.
 func (l *Log) Info(ctx context.Context, msg string) {
+	if l == nil {
+		return
+	}
+
 	l.print(ctx, LevelInfo, msg)
 }
 
 // Error prints message msg with level=error.
 func (l *Log) Error(ctx context.Context, msg string) {
+	if l == nil {
+		return
+	}
+
 	l.print(ctx, LevelError, msg)
 }
 
 // Fatal prints message msg with level=fatal and calls os.Exit(1).
 func (l *Log) Fatal(ctx context.Context, msg string) {
+	if l == nil {
+		os.Stdout.WriteString(msg)
+		os.Exit(1)
+	}
+
 	l.print(ctx, LevelFatal, msg)
 	os.Exit(1)
 }
@@ -165,6 +186,10 @@ func (l *Log) write(ctx context.Context, level, timeStr, msg string) error {
 
 // WithFields returns new context with specified log fields added to it.
 func (l *Log) WithFields(ctx context.Context, newFields map[string]interface{}) context.Context {
+	if l == nil {
+		return ctx
+	}
+
 	var fields map[string]interface{}
 	oldFields, ok := ctx.Value(l.ctxKeyFields).(map[string]interface{})
 	if ok {

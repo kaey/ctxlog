@@ -73,3 +73,15 @@ func TestLog(t *testing.T) {
 		}
 	})
 }
+
+func TestNilLog(t *testing.T) {
+	ctx := context.Background()
+	var log *ctxlog.Log
+
+	log.Debug(ctx, "should not panic")
+
+	nctx := log.WithField(ctx, "foo", "bar")
+	if ctx != nctx {
+		t.Errorf("WithField called on nil logger should have returned original context")
+	}
+}
