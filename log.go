@@ -14,6 +14,7 @@ import (
 	"time"
 )
 
+// Log levels.
 const (
 	LevelDebug = "debug"
 	LevelInfo  = "info"
@@ -23,7 +24,7 @@ const (
 
 type ctxKey string
 
-// Log
+// Log is a logging object which writes logs to os.Stdout in json format.
 type Log struct {
 	output io.Writer
 	debug  *int32 // bool, accessed with sync/atomic.
@@ -162,7 +163,7 @@ func (l *Log) write(ctx context.Context, level, timeStr, msg string) error {
 	return nil
 }
 
-// AddFields returns new context with specified log fields added to it.
+// WithFields returns new context with specified log fields added to it.
 func (l *Log) WithFields(ctx context.Context, newFields map[string]interface{}) context.Context {
 	var fields map[string]interface{}
 	oldFields, ok := ctx.Value(l.ctxKeyFields).(map[string]interface{})
@@ -186,7 +187,7 @@ func (l *Log) WithField(ctx context.Context, key string, value interface{}) cont
 	return l.WithFields(ctx, map[string]interface{}{key: value})
 }
 
-// WithField returns new context with error field added to it.
+// WithError returns new context with error field added to it.
 func (l *Log) WithError(ctx context.Context, err error) context.Context {
 	return l.WithFields(ctx, map[string]interface{}{"error": err})
 }
