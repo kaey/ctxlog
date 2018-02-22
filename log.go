@@ -221,3 +221,11 @@ func (l *Log) WithField(ctx context.Context, key string, value interface{}) cont
 func (l *Log) WithError(ctx context.Context, err error) context.Context {
 	return l.WithFields(ctx, map[string]interface{}{"error": err})
 }
+
+// Writer returns io.Writer which logs data written to it in ctxlog format.
+func (l *Log) Writer(ctx context.Context) io.Writer {
+	return &writer{
+		l:   l,
+		ctx: ctx,
+	}
+}
