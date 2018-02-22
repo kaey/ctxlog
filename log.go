@@ -26,8 +26,9 @@ type ctxKey string
 
 // Log is a logging object which writes logs to os.Stdout in json format.
 type Log struct {
-	output io.Writer
-	debug  *int32 // bool, accessed with sync/atomic.
+	output   io.Writer
+	outputMu sync.Mutex
+	debug    *int32 // bool, accessed with sync/atomic.
 
 	ctxKeyFields ctxKey
 	ctxKeyDebug  ctxKey
@@ -152,7 +153,9 @@ func (l *Log) print(ctx context.Context, level, msg string) {
 			panic(err)
 		}
 
+		l.outputMu.Lock()
 		_, _ = l.output.Write(buf.Bytes())
+		l.outputMu.Unlock()
 	}
 }
 
@@ -180,7 +183,9 @@ func (l *Log) write(ctx context.Context, level, timeStr, msg string) error {
 		return err
 	}
 
+	l.outputMu.Lock()
 	_, _ = l.output.Write(buf.Bytes())
+	l.outputMu.Unlock()
 	return nil
 }
 
