@@ -12,7 +12,7 @@ import (
 
 func TestLog(t *testing.T) {
 	ctx := context.Background()
-	log := ctxlog.New()
+	log := ctxlog.New(map[string]interface{}{"top-level": "foo"})
 	buf := new(bytes.Buffer)
 	log.SetOutput(buf)
 
@@ -22,7 +22,7 @@ func TestLog(t *testing.T) {
 			t.Errorf("unexpected error from print: %v", err)
 		}
 
-		expected := `{"level":"info","msg":"foo","time":"now"}` + "\n"
+		expected := `{"level":"info","msg":"foo","time":"now","top-level":"foo"}` + "\n"
 		got := buf.String()
 		if expected != got {
 			t.Errorf("expected: %v, got: %v", expected, got)
@@ -36,7 +36,7 @@ func TestLog(t *testing.T) {
 			t.Errorf("unexpected error from print: %v", err)
 		}
 
-		expected := `{"error":"bar error","level":"error","msg":"bar","time":"now"}` + "\n"
+		expected := `{"error":"bar error","level":"error","msg":"bar","time":"now","top-level":"foo"}` + "\n"
 		got := buf.String()
 		if expected != got {
 			t.Errorf("expected: %v, got: %v", expected, got)

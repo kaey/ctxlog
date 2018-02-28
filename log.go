@@ -28,7 +28,8 @@ type ctxKey string
 type Log struct {
 	output   io.Writer
 	outputMu sync.Mutex
-	debug    *int32 // bool, accessed with sync/atomic.
+	debug    *int32                 // bool, accessed with sync/atomic.
+	fields   map[string]interface{} // top level fields
 
 	ctxKeyFields ctxKey
 	ctxKeyDebug  ctxKey
@@ -43,14 +44,16 @@ type encodeError struct {
 	Level   string `json:"level"`
 }
 
-// New creates new Log instance which prints messages to stderr.
-func New() *Log {
+// New creates new Log instance which prints messages to stderr. Fields will be added to all log messages,
+// unless it's nil.
+func New(fields map[string]interface{}) *Log {
 	l := &Log{
 		output: os.Stderr,
 		debug:  new(int32),
 	}
 	l.ctxKeyFields = ctxKey(fmt.Sprintf("fields-%p", l))
 	l.ctxKeyDebug = ctxKey(fmt.Sprintf("debug-%p", l))
+	l.fields = fields
 	return l
 }
 
@@ -162,7 +165,10 @@ func (l *Log) print(ctx context.Context, level, msg string) {
 func (l *Log) write(ctx context.Context, level, timeStr, msg string) error {
 	fields, _ := ctx.Value(l.ctxKeyFields).(map[string]interface{})
 
-	logFields := make(map[string]interface{}, len(fields)+2)
+	logFields := make(map[string]interface{}, len(l.fields)+len(fields)+3)
+	for k, v := range l.fields {
+		logFields[k] = v
+	}
 	for k, v := range fields {
 		if err, ok := v.(error); ok {
 			logFields[k] = err.Error()

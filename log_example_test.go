@@ -7,7 +7,7 @@ import (
 )
 
 func Example() {
-	log := ctxlog.New()
+	log := ctxlog.New(nil)
 	ctx := context.Background()
 
 	log.Info(ctx, "hello world")
