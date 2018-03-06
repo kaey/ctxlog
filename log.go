@@ -5,123 +5,137 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"os"
-	"runtime"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
 // Log levels.
 const (
-	LevelDebug = "debug"
-	LevelInfo  = "info"
-	LevelError = "error"
-	LevelFatal = "fatal"
+	levelDebug = "debug"
+	levelInfo  = "info"
+	levelError = "error"
+	levelFatal = "fatal"
 )
 
 type ctxKey string
 
-// Log is a logging object which writes logs to os.Stdout in json format.
+// Log is a logging object. Use New to create it.
 type Log struct {
-	output   io.Writer
-	outputMu sync.Mutex
-	debug    *int32                 // bool, accessed with sync/atomic.
-	fields   map[string]interface{} // top level fields
-
-	ctxKeyFields ctxKey
-	ctxKeyDebug  ctxKey
+	output          io.Writer
+	outputMu        sync.Mutex
+	ctxDataKey      ctxKey
+	fields          map[string]interface{}
+	debug           bool
+	stackTraceField string
 }
 
-type encodeError struct {
-	Time    string `json:"time"`
-	File    string `json:"file"`
-	Error   string `json:"error"`
-	Msg     string `json:"msg"`
-	OrigMsg string `json:"orig-msg"`
-	Level   string `json:"level"`
-}
+// New creates new Log instance. Output goes to stdout by default. You can specify additional options.
+func New(opts ...Option) *Log {
+	l := new(Log)
 
-// New creates new Log instance which prints messages to stderr. Fields will be added to all log messages,
-// unless it's nil.
-func New(fields map[string]interface{}) *Log {
-	l := &Log{
-		output: os.Stderr,
-		debug:  new(int32),
+	for _, opt := range opts {
+		opt(l)
 	}
-	l.ctxKeyFields = ctxKey(fmt.Sprintf("fields-%p", l))
-	l.ctxKeyDebug = ctxKey(fmt.Sprintf("debug-%p", l))
-	l.fields = fields
+
+	l.ctxDataKey = ctxKey("ctxlog.ctxdata")
+	if l.output == nil {
+		l.output = os.Stdout
+	}
+
 	return l
 }
 
-// SetDebugGlobal globally enables/disables debug messages. Can be called concurrently with other functions.
-func (l *Log) SetDebugGlobal(v bool) {
-	if v {
-		atomic.StoreInt32(l.debug, 1)
-		return
-	}
-
-	atomic.StoreInt32(l.debug, 0)
+type ctxData struct {
+	debug  bool
+	fields map[string]interface{}
+	err    error
 }
 
-// SetDebug returns new context with enabled/disabled debug messages. Overrides global debug flag.
-func (l *Log) SetDebug(ctx context.Context, v bool) context.Context {
-	if l == nil {
-		return ctx
+func (l *Log) getCtxData(ctx context.Context) *ctxData {
+	cd, ok := ctx.Value(l.ctxDataKey).(*ctxData)
+	if ok {
+		return &ctxData{
+			debug:  cd.debug,
+			fields: copyLogFields(cd.fields),
+			err:    cd.err,
+		}
 	}
 
-	return context.WithValue(ctx, l.ctxKeyDebug, v)
+	return &ctxData{
+		debug:  l.debug,
+		fields: copyLogFields(l.fields),
+		err:    nil,
+	}
+}
+
+func copyLogFields(m map[string]interface{}) map[string]interface{} {
+	r := make(map[string]interface{}, len(m)+5)
+	for k, v := range m {
+		if err, ok := v.(error); ok {
+			r[k] = err.Error()
+			continue
+		}
+		r[k] = v
+	}
+
+	return r
 }
 
 // Debug prints message with level=debug only if debug is enabled.
-func (l *Log) Debug(ctx context.Context, msg string) {
+func (l *Log) Debug(ctx context.Context, msg string, fields ...map[string]interface{}) {
 	if l == nil {
 		return
 	}
 
-	debug, ok := ctx.Value(l.ctxKeyDebug).(bool)
-	if ok {
-		if !debug {
-			return
-		}
-	} else {
-		if atomic.LoadInt32(l.debug) == 0 {
-			return
-		}
+	if len(fields) > 0 {
+		ctx = l.WithFields(ctx, fields[0])
 	}
-
-	l.print(ctx, LevelDebug, msg)
+	l.print(ctx, levelDebug, msg)
 }
 
 // Info prints message msg with level=info.
-func (l *Log) Info(ctx context.Context, msg string) {
+func (l *Log) Info(ctx context.Context, msg string, fields ...map[string]interface{}) {
 	if l == nil {
 		return
 	}
 
-	l.print(ctx, LevelInfo, msg)
+	if len(fields) > 0 {
+		ctx = l.WithFields(ctx, fields[0])
+	}
+	l.print(ctx, levelInfo, msg)
 }
 
 // Error prints message msg with level=error.
-func (l *Log) Error(ctx context.Context, msg string) {
+func (l *Log) Error(ctx context.Context, msg string, err error, fields ...map[string]interface{}) {
 	if l == nil {
 		return
 	}
 
-	l.print(ctx, LevelError, msg)
+	if len(fields) > 0 {
+		ctx = l.WithFields(ctx, fields[0])
+	}
+	if err != nil {
+		ctx = l.WithError(ctx, err)
+	}
+	l.print(ctx, levelError, msg)
 }
 
 // Fatal prints message msg with level=fatal and calls os.Exit(1).
-func (l *Log) Fatal(ctx context.Context, msg string) {
+func (l *Log) Fatal(ctx context.Context, msg string, err error, fields ...map[string]interface{}) {
 	if l == nil {
 		os.Stdout.WriteString(msg)
 		os.Exit(1)
 	}
 
-	l.print(ctx, LevelFatal, msg)
+	if len(fields) > 0 {
+		ctx = l.WithFields(ctx, fields[0])
+	}
+	if err != nil {
+		ctx = l.WithError(ctx, err)
+	}
+	l.print(ctx, levelFatal, msg)
 	os.Exit(1)
 }
 
@@ -131,15 +145,17 @@ var bufPool = sync.Pool{
 	},
 }
 
+type encodeError struct {
+	Time    string `json:"time"`
+	Error   string `json:"error"`
+	Msg     string `json:"msg"`
+	OrigMsg string `json:"orig-msg"`
+	Level   string `json:"level"`
+}
+
 func (l *Log) print(ctx context.Context, level, msg string) {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	if err := l.write(ctx, level, now, msg); err != nil {
-		f := ""
-		_, file, line, ok := runtime.Caller(2)
-		if ok {
-			f = fmt.Sprintf("%v:%v", file, line)
-		}
-
 		buf := bufPool.Get().(*bytes.Buffer)
 		defer bufPool.Put(buf)
 		buf.Reset()
@@ -147,10 +163,9 @@ func (l *Log) print(ctx context.Context, level, msg string) {
 		encErr := encodeError{
 			Time:    now,
 			Error:   err.Error(),
-			File:    f,
 			Msg:     "ctxlog: json encode error",
 			OrigMsg: msg,
-			Level:   LevelError,
+			Level:   levelError,
 		}
 		if err := json.NewEncoder(buf).Encode(encErr); err != nil {
 			panic(err)
@@ -163,29 +178,31 @@ func (l *Log) print(ctx context.Context, level, msg string) {
 }
 
 func (l *Log) write(ctx context.Context, level, timeStr, msg string) error {
-	fields, _ := ctx.Value(l.ctxKeyFields).(map[string]interface{})
+	cd := l.getCtxData(ctx)
 
-	logFields := make(map[string]interface{}, len(l.fields)+len(fields)+3)
-	for k, v := range l.fields {
-		logFields[k] = v
+	if level == levelDebug && !cd.debug {
+		return nil
 	}
-	for k, v := range fields {
-		if err, ok := v.(error); ok {
-			logFields[k] = err.Error()
-			continue
+
+	if cd.err != nil {
+		if l.stackTraceField != "" {
+			st := stack(cd.err)
+			if st != nil {
+				cd.fields[l.stackTraceField] = st
+			}
 		}
-		logFields[k] = v
+		cd.fields["error"] = cd.err.Error()
 	}
 
-	logFields["msg"] = msg
-	logFields["time"] = timeStr
-	logFields["level"] = level
+	cd.fields["msg"] = msg
+	cd.fields["time"] = timeStr
+	cd.fields["level"] = level
 
 	buf := bufPool.Get().(*bytes.Buffer)
 	defer bufPool.Put(buf)
 	buf.Reset()
 
-	if err := json.NewEncoder(buf).Encode(logFields); err != nil {
+	if err := json.NewEncoder(buf).Encode(cd.fields); err != nil {
 		return err
 	}
 
@@ -196,36 +213,61 @@ func (l *Log) write(ctx context.Context, level, timeStr, msg string) error {
 }
 
 // WithFields returns new context with specified log fields added to it.
-func (l *Log) WithFields(ctx context.Context, newFields map[string]interface{}) context.Context {
+func (l *Log) WithFields(ctx context.Context, fields map[string]interface{}) context.Context {
 	if l == nil {
 		return ctx
 	}
 
-	var fields map[string]interface{}
-	oldFields, ok := ctx.Value(l.ctxKeyFields).(map[string]interface{})
-	if ok {
-		fields = make(map[string]interface{}, len(oldFields)+len(newFields))
-		for k, v := range oldFields {
-			fields[k] = v
-		}
-	} else {
-		fields = make(map[string]interface{}, len(newFields))
-	}
-	for k, v := range newFields {
-		fields[k] = v
+	if len(fields) == 0 {
+		return ctx
 	}
 
-	return context.WithValue(ctx, l.ctxKeyFields, fields)
+	cd := l.getCtxData(ctx)
+	for k, v := range fields {
+		cd.fields[k] = v
+	}
+
+	return context.WithValue(ctx, l.ctxDataKey, cd)
 }
 
 // WithField returns new context with specified log field added to it.
 func (l *Log) WithField(ctx context.Context, key string, value interface{}) context.Context {
-	return l.WithFields(ctx, map[string]interface{}{key: value})
+	if l == nil {
+		return ctx
+	}
+
+	cd := l.getCtxData(ctx)
+	cd.fields[key] = value
+
+	return context.WithValue(ctx, l.ctxDataKey, cd)
 }
 
 // WithError returns new context with error field added to it.
 func (l *Log) WithError(ctx context.Context, err error) context.Context {
-	return l.WithFields(ctx, map[string]interface{}{"error": err})
+	if l == nil {
+		return ctx
+	}
+
+	if err == nil {
+		return ctx
+	}
+
+	cd := l.getCtxData(ctx)
+	cd.err = err
+
+	return context.WithValue(ctx, l.ctxDataKey, cd)
+}
+
+// WithDebug returns new context with enabled/disabled debug messages. Overrides global option.
+func (l *Log) WithDebug(ctx context.Context, v bool) context.Context {
+	if l == nil {
+		return ctx
+	}
+
+	cd := l.getCtxData(ctx)
+	cd.debug = v
+
+	return context.WithValue(ctx, l.ctxDataKey, cd)
 }
 
 // Writer returns io.Writer which logs data written to it in ctxlog format.

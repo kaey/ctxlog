@@ -12,9 +12,11 @@ import (
 
 func TestLog(t *testing.T) {
 	ctx := context.Background()
-	log := ctxlog.New(map[string]interface{}{"top-level": "foo"})
 	buf := new(bytes.Buffer)
-	log.SetOutput(buf)
+	log := ctxlog.New(
+		ctxlog.Fields(map[string]interface{}{"top-level": "foo"}),
+		ctxlog.Output(buf),
+	)
 
 	t.Run("PrintInfo", func(t *testing.T) {
 		buf.Reset()
@@ -56,17 +58,16 @@ func TestLog(t *testing.T) {
 		err := ctxlog.EncodeError{
 			Time:    "now",
 			Error:   "foo err",
-			File:    "some file",
 			Msg:     "encode error",
 			OrigMsg: "original msg",
-			Level:   ctxlog.LevelError,
+			Level:   "error",
 		}
 
 		if err := json.NewEncoder(buf).Encode(err); err != nil {
 			t.Errorf("unexpected error from json.Encode: %v", err)
 		}
 
-		expected := `{"time":"now","file":"some file","error":"foo err","msg":"encode error","orig-msg":"original msg","level":"error"}` + "\n"
+		expected := `{"time":"now","error":"foo err","msg":"encode error","orig-msg":"original msg","level":"error"}` + "\n"
 		got := buf.String()
 		if expected != got {
 			t.Errorf("expected: %v, got: %v", expected, got)
