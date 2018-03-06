@@ -1,7 +1,5 @@
 package ctxlog
 
-import "io"
-
 // Option is a func which alter behaviour of logger.
 type Option func(log *Log)
 
@@ -12,23 +10,23 @@ func EnableDebug(v bool) Option {
 	}
 }
 
-// ErrorStackTrace sets field name where to record stack trace if it is present in error. See StackTracer and runtime.Callers().
-func ErrorStackTrace(field string) Option {
+// ErrorStack sets field name where to record stack trace if it is present in error. See Stacker and runtime.Callers().
+func ErrorStack(field string) Option {
 	return func(log *Log) {
-		log.stackTraceField = field
+		log.stackField = field
 	}
 }
 
 // Fields sets fields which will be added to all messages.
 func Fields(fields map[string]interface{}) Option {
 	return func(log *Log) {
-		log.fields = copyLogFields(fields)
+		log.fields = copyFields(fields)
 	}
 }
 
-// Output sets output. Default is os.Stdout.
-func Output(w io.Writer) Option {
+// Printer sets printer function. Default is json printer with os.Stdout.
+func Printer(f PrinterFunc) Option {
 	return func(log *Log) {
-		log.output = w
+		log.printer = f
 	}
 }

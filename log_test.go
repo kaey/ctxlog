@@ -3,76 +3,87 @@ package ctxlog_test
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
+	"io/ioutil"
+	"reflect"
 	"testing"
 
 	"github.com/kaey/ctxlog"
 )
 
-func TestLog(t *testing.T) {
+func newTestEncoder(f map[string]interface{}) ctxlog.PrinterFunc {
+	return func(fields map[string]interface{}) {
+		for k, v := range fields {
+			f[k] = v
+		}
+	}
+}
+
+func TestPrintInfo(t *testing.T) {
+	got := make(map[string]interface{})
+	log := ctxlog.New(ctxlog.Printer(newTestEncoder(got)))
 	ctx := context.Background()
+
+	log.Info(ctx, "foo")
+	got["time"] = "now"
+	expected := map[string]interface{}{
+		"level": "info",
+		"msg":   "foo",
+		"time":  "now",
+	}
+
+	if !reflect.DeepEqual(expected, got) {
+		t.Errorf("expected: %v, got: %v", expected, got)
+	}
+}
+
+func TestWithError(t *testing.T) {
+	got := make(map[string]interface{})
+	log := ctxlog.New(ctxlog.Printer(newTestEncoder(got)))
+	ctx := log.WithError(context.Background(), fmt.Errorf("bar error"))
+
+	log.Info(ctx, "foo")
+	got["time"] = "now"
+	expected := map[string]interface{}{
+		"level": "info",
+		"msg":   "foo",
+		"time":  "now",
+		"error": "bar error",
+	}
+
+	if !reflect.DeepEqual(expected, got) {
+		t.Errorf("expected: %v, got: %v", expected, got)
+	}
+}
+
+func TestPrinter(t *testing.T) {
 	buf := new(bytes.Buffer)
-	log := ctxlog.New(
-		ctxlog.Fields(map[string]interface{}{"top-level": "foo"}),
-		ctxlog.Output(buf),
-	)
+	printer := ctxlog.DefaultPrinter(buf)
 
-	t.Run("PrintInfo", func(t *testing.T) {
-		buf.Reset()
-		if err := log.Write(ctx, "info", "now", "foo"); err != nil {
-			t.Errorf("unexpected error from print: %v", err)
-		}
+	fields := map[string]interface{}{
+		"error": "some error",
+		"level": "info",
+		"msg":   "foo",
+		"time":  "now",
+	}
 
-		expected := `{"level":"info","msg":"foo","time":"now","top-level":"foo"}` + "\n"
-		got := buf.String()
-		if expected != got {
-			t.Errorf("expected: %v, got: %v", expected, got)
-		}
-	})
+	printer(fields)
+	expected := `{"error":"some error","level":"info","msg":"foo","time":"now"}` + "\n"
+	got := buf.String()
 
-	t.Run("WithError", func(t *testing.T) {
-		buf.Reset()
-		ctx = log.WithError(ctx, fmt.Errorf("bar error"))
-		if err := log.Write(ctx, "error", "now", "bar"); err != nil {
-			t.Errorf("unexpected error from print: %v", err)
-		}
+	if expected != got {
+		t.Errorf("expected: %v, got: %v", expected, got)
+	}
 
-		expected := `{"error":"bar error","level":"error","msg":"bar","time":"now","top-level":"foo"}` + "\n"
-		got := buf.String()
-		if expected != got {
-			t.Errorf("expected: %v, got: %v", expected, got)
-		}
-	})
+	buf.Reset()
+	fields["chan"] = make(chan string)
+	printer(fields)
+	expected = `{"error":"json: unsupported type: chan string","level":"error","msg":"ctxlog: json encode error","orig-msg":"foo","time":"now"}` + "\n"
+	got = buf.String()
 
-	t.Run("EncodeError", func(t *testing.T) {
-		buf.Reset()
-		ctx = log.WithField(ctx, "chan", make(chan string))
-		if err := log.Write(ctx, "info", "now", "chan"); err == nil {
-			t.Errorf("expected error from print, got nil")
-		}
-	})
-
-	t.Run("EncodeErrorMarshal", func(t *testing.T) {
-		buf.Reset()
-		err := ctxlog.EncodeError{
-			Time:    "now",
-			Error:   "foo err",
-			Msg:     "encode error",
-			OrigMsg: "original msg",
-			Level:   "error",
-		}
-
-		if err := json.NewEncoder(buf).Encode(err); err != nil {
-			t.Errorf("unexpected error from json.Encode: %v", err)
-		}
-
-		expected := `{"time":"now","error":"foo err","msg":"encode error","orig-msg":"original msg","level":"error"}` + "\n"
-		got := buf.String()
-		if expected != got {
-			t.Errorf("expected: %v, got: %v", expected, got)
-		}
-	})
+	if expected != got {
+		t.Errorf("expected: %v, got: %v", expected, got)
+	}
 }
 
 func TestNilLog(t *testing.T) {
@@ -80,6 +91,12 @@ func TestNilLog(t *testing.T) {
 	var log *ctxlog.Log
 
 	log.Debug(ctx, "should not panic")
+	log.Info(ctx, "should not panic")
+	log.Error(ctx, "should not panic", fmt.Errorf("some err"))
+
+	if w := log.Writer(ctx); w != ioutil.Discard {
+		t.Errorf("expected discard writer, got %v", w)
+	}
 
 	nctx := log.WithField(ctx, "foo", "bar")
 	if ctx != nctx {
