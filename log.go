@@ -69,14 +69,7 @@ func (l *Log) getCtxData(ctx context.Context) *ctxData {
 
 func copyFields(from map[string]interface{}) map[string]interface{} {
 	to := make(map[string]interface{}, len(from)+10)
-	for k, v := range from {
-		if err, ok := v.(error); ok {
-			to[k] = err.Error()
-			continue
-		}
-		to[k] = v
-	}
-
+	setFields(from, to)
 	return to
 }
 
