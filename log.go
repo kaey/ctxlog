@@ -1,4 +1,4 @@
-// Package ctxlog is a json logger with context support.
+// Package ctxlog is a logger with context support.
 package ctxlog
 
 import (
@@ -17,7 +17,7 @@ const (
 	levelFatal = "fatal"
 )
 
-type ctxKey string
+type ctxKey int
 
 // Log is a logging object. Use New to create it.
 type Log struct {
@@ -36,7 +36,6 @@ func New(opts ...Option) *Log {
 		opt(l)
 	}
 
-	l.ctxDataKey = ctxKey("ctxlog.ctxdata")
 	if l.printer == nil {
 		l.printer = DefaultPrinter(os.Stdout)
 	}
@@ -44,123 +43,70 @@ func New(opts ...Option) *Log {
 	return l
 }
 
-type ctxData struct {
-	debug  bool
-	fields map[string]interface{}
-	err    error
-}
-
-func (l *Log) getCtxData(ctx context.Context) *ctxData {
-	cd, ok := ctx.Value(l.ctxDataKey).(*ctxData)
-	if ok {
-		return &ctxData{
-			debug:  cd.debug,
-			fields: copyFields(cd.fields),
-			err:    cd.err,
-		}
-	}
-
-	return &ctxData{
-		debug:  l.debug,
-		fields: copyFields(l.fields),
-		err:    nil,
-	}
-}
-
-func copyFields(from map[string]interface{}) map[string]interface{} {
-	to := make(map[string]interface{}, len(from)+10)
-	setFields(from, to)
-	return to
-}
-
-func setFields(from, to map[string]interface{}) {
-	for k, v := range from {
-		if err, ok := v.(error); ok {
-			to[k] = err.Error()
-			continue
-		}
-		to[k] = v
-	}
-}
-
 // Debug prints message with level=debug only if debug is enabled.
-func (l *Log) Debug(ctx context.Context, msg string, fields ...map[string]interface{}) {
+func (l *Log) Debug(ctx context.Context, msg string, fieldsVar ...map[string]interface{}) {
 	if l == nil {
 		return
 	}
 
-	cd := l.getCtxData(ctx)
-	if !cd.debug {
+	cd := l.copyCtxData(ctx, true, fieldsVar, nPrintFields)
+	if cd == nil {
 		return
 	}
-	if len(fields) > 0 {
-		setFields(fields[0], cd.fields)
-	}
-
 	l.print(cd, levelDebug, msg)
 }
 
 // Info prints message msg with level=info.
-func (l *Log) Info(ctx context.Context, msg string, fields ...map[string]interface{}) {
+func (l *Log) Info(ctx context.Context, msg string, fieldsVar ...map[string]interface{}) {
 	if l == nil {
 		return
 	}
 
-	cd := l.getCtxData(ctx)
-	if len(fields) > 0 {
-		setFields(fields[0], cd.fields)
-	}
+	cd := l.copyCtxData(ctx, false, fieldsVar, nPrintFields)
 	l.print(cd, levelInfo, msg)
 }
 
 // Error prints message msg with level=error.
-func (l *Log) Error(ctx context.Context, msg string, err error, fields ...map[string]interface{}) {
+func (l *Log) Error(ctx context.Context, msg string, err error, fieldsVar ...map[string]interface{}) {
 	if l == nil {
 		return
 	}
 
-	cd := l.getCtxData(ctx)
-	if len(fields) > 0 {
-		setFields(fields[0], cd.fields)
-	}
-	if err != nil {
-		cd.err = err
-	}
+	cd := l.copyCtxData(ctx, false, fieldsVar, nPrintFields)
+	cd.err = err
 	l.print(cd, levelError, msg)
 }
 
 // Fatal prints message msg with level=fatal and calls os.Exit(1).
-func (l *Log) Fatal(ctx context.Context, msg string, err error, fields ...map[string]interface{}) {
+func (l *Log) Fatal(ctx context.Context, msg string, err error, fieldsVar ...map[string]interface{}) {
 	if l == nil {
 		os.Stdout.WriteString(msg + "\n")
 		os.Exit(1)
 	}
 
-	cd := l.getCtxData(ctx)
-	if len(fields) > 0 {
-		setFields(fields[0], cd.fields)
-	}
-	if err != nil {
-		cd.err = err
-	}
+	cd := l.copyCtxData(ctx, false, fieldsVar, nPrintFields)
+	cd.err = err
 	l.print(cd, levelFatal, msg)
 	os.Exit(1)
 }
 
+const nPrintFields = 4 // error + msg + level + time
+
 func (l *Log) print(cd *ctxData, level, msg string) {
 	if cd.err != nil {
+		cd.fields["error"] = cd.err.Error()
+
 		if l.stackField != "" {
 			st := stack(cd.err)
 			if st != nil {
 				cd.fields[l.stackField] = st
 			}
 		}
-		cd.fields["error"] = cd.err.Error()
 	}
 
 	cd.fields["msg"] = msg
 	cd.fields["level"] = level
-	cd.fields["time"] = time.Now().UTC().Format(time.RFC3339Nano)
+	cd.fields["time"] = time.Now().UTC()
 
 	l.printer(cd.fields)
 }
@@ -175,11 +121,8 @@ func (l *Log) WithFields(ctx context.Context, fields map[string]interface{}) con
 		return ctx
 	}
 
-	cd := l.getCtxData(ctx)
-	for k, v := range fields {
-		cd.fields[k] = v
-	}
-
+	fieldsVar := []map[string]interface{}{fields}
+	cd := l.copyCtxData(ctx, false, fieldsVar, 0)
 	return context.WithValue(ctx, l.ctxDataKey, cd)
 }
 
@@ -189,9 +132,8 @@ func (l *Log) WithField(ctx context.Context, key string, value interface{}) cont
 		return ctx
 	}
 
-	cd := l.getCtxData(ctx)
-	cd.fields[key] = value
-
+	cd := l.copyCtxData(ctx, false, nil, 1)
+	setField(cd.fields, key, value)
 	return context.WithValue(ctx, l.ctxDataKey, cd)
 }
 
@@ -205,9 +147,8 @@ func (l *Log) WithError(ctx context.Context, err error) context.Context {
 		return ctx
 	}
 
-	cd := l.getCtxData(ctx)
+	cd := l.copyCtxData(ctx, false, nil, 0)
 	cd.err = err
-
 	return context.WithValue(ctx, l.ctxDataKey, cd)
 }
 
@@ -217,13 +158,12 @@ func (l *Log) WithDebug(ctx context.Context, v bool) context.Context {
 		return ctx
 	}
 
-	cd := l.getCtxData(ctx)
+	cd := l.copyCtxData(ctx, false, nil, 0)
 	cd.debug = v
-
 	return context.WithValue(ctx, l.ctxDataKey, cd)
 }
 
-// Writer returns io.Writer which logs data written to it in ctxlog format.
+// Writer returns io.Writer which calls l.Info for every write to it.
 func (l *Log) Writer(ctx context.Context) io.Writer {
 	if l == nil {
 		return ioutil.Discard
@@ -233,4 +173,60 @@ func (l *Log) Writer(ctx context.Context) io.Writer {
 		l:   l,
 		ctx: ctx,
 	}
+}
+
+type ctxData struct {
+	debug  bool
+	fields map[string]interface{}
+	err    error
+}
+
+func (l *Log) copyCtxData(ctx context.Context, debugLevel bool, fieldsVar []map[string]interface{}, prealloc int) *ctxData {
+	cd, ok := ctx.Value(l.ctxDataKey).(*ctxData)
+	if !ok {
+		cd = &ctxData{
+			debug:  l.debug,
+			fields: l.fields,
+			err:    nil,
+		}
+	}
+
+	if debugLevel && !cd.debug {
+		return nil
+	}
+
+	var fields map[string]interface{}
+	if len(fieldsVar) > 0 {
+		fields = fieldsVar[0]
+	}
+
+	newfields := make(map[string]interface{}, len(cd.fields)+len(fields)+prealloc)
+	for k, v := range cd.fields {
+		newfields[k] = v
+	}
+	setFields(fields, newfields)
+
+	return &ctxData{
+		debug:  cd.debug,
+		fields: newfields,
+		err:    cd.err,
+	}
+}
+
+func setFields(from, to map[string]interface{}) {
+	for k, v := range from {
+		if err, ok := v.(error); ok {
+			to[k] = err.Error()
+			continue
+		}
+		to[k] = v
+	}
+}
+
+func setField(m map[string]interface{}, k string, v interface{}) {
+	if err, ok := v.(error); ok {
+		m[k] = err.Error()
+		return
+	}
+	m[k] = v
 }

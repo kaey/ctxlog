@@ -7,6 +7,8 @@ import (
 	"sync"
 )
 
+// PrinterFunc is called for every call to log Debug/Info/Debug/Fatal. It's job is to encode received fields and write them somewhere (see DefaultPrinter).
+// Must be safe for concurrent use.
 type PrinterFunc func(fields map[string]interface{})
 
 var bufPool = sync.Pool{
@@ -15,6 +17,7 @@ var bufPool = sync.Pool{
 	},
 }
 
+// DefaultPrinter prints fields in json format to w.
 func DefaultPrinter(w io.Writer) PrinterFunc {
 	var mu sync.Mutex
 	return func(fields map[string]interface{}) {

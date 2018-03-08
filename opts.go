@@ -20,7 +20,9 @@ func ErrorStack(field string) Option {
 // Fields sets fields which will be added to all messages.
 func Fields(fields map[string]interface{}) Option {
 	return func(log *Log) {
-		log.fields = copyFields(fields)
+		newfields := make(map[string]interface{}, len(fields))
+		setFields(fields, newfields)
+		log.fields = newfields
 	}
 }
 
