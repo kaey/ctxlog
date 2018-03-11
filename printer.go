@@ -3,6 +3,7 @@ package ctxlog
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"sync"
 )
@@ -27,10 +28,10 @@ func DefaultPrinter(w io.Writer) PrinterFunc {
 
 		if err := json.NewEncoder(buf).Encode(fields); err != nil {
 			encErr := map[string]interface{}{
-				"time":     fields["time"],
+				"time":     fmt.Sprint(fields["time"]),
 				"error":    err.Error(),
 				"msg":      "ctxlog: json encode error",
-				"orig-msg": fields["msg"],
+				"orig-msg": fmt.Sprint(fields["msg"]),
 				"level":    levelError,
 			}
 			buf.Reset()
