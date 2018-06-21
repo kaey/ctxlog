@@ -3,19 +3,25 @@ package ctxlog_test
 import (
 	"context"
 	"fmt"
+	"os"
+	"time"
 
 	"github.com/kaey/ctxlog"
 )
 
-func Example() {
-	log := ctxlog.New()
+func ExampleLog_Print() {
+	log := ctxlog.New(ctxlog.Output(os.Stdout))
 	ctx := context.Background()
 
-	log.Info(ctx, "hello world")
-	// Prints: {"level":"info","msg":"hello world","time":"2018-01-16T13:01:35.623558838Z"}
+	log.Print(ctx, "hello world", ctxlog.Time(time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)))
+	// Output: {"msg":"hello world","time":"2000-01-01T00:00:00Z"}
+}
 
-	ctx = log.WithField(ctx, "foo", "bar")
-	err := fmt.Errorf("broken pipe")
-	log.Error(ctx, "hello again world", err)
-	// Prints: {"foo":"bar","level":"error","msg":"hello again world","time":"2018-01-16T13:01:35.62356885Z"}
+func ExampleLog_Print_error() {
+	log := ctxlog.New(ctxlog.Output(os.Stdout))
+	ctx := context.Background()
+
+	ctx = log.With(ctx, ctxlog.Field("foo", "bar"), ctxlog.Time(time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)))
+	log.Print(ctx, "hello again world", ctxlog.Error(fmt.Errorf("broken pipe")))
+	// Output: {"error":"broken pipe","foo":"bar","msg":"hello again world","time":"2000-01-01T00:00:00Z"}
 }

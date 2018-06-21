@@ -5,82 +5,67 @@ import (
 	"context"
 	"fmt"
 	"io/ioutil"
-	"reflect"
 	"testing"
+	"time"
 
 	"github.com/kaey/ctxlog"
 )
 
-func newTestEncoder(f map[string]interface{}) ctxlog.PrinterFunc {
-	return func(fields map[string]interface{}) {
-		for k, v := range fields {
-			f[k] = v
-		}
-	}
-}
-
 func TestPrintInfo(t *testing.T) {
-	got := make(map[string]interface{})
-	log := ctxlog.New(ctxlog.Printer(newTestEncoder(got)))
+	buf := new(bytes.Buffer)
+	log := ctxlog.New(
+		ctxlog.ContextOptions(
+			ctxlog.Field("foo", "bar"),
+			ctxlog.Time(time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)),
+		),
+		ctxlog.Output(buf),
+	)
 	ctx := context.Background()
 
-	log.Info(ctx, "foo")
-	got["time"] = "now"
-	expected := map[string]interface{}{
-		"level": "info",
-		"msg":   "foo",
-		"time":  "now",
-	}
+	log.Print(ctx, "foo")
 
-	if !reflect.DeepEqual(expected, got) {
+	expected := `{"foo":"bar","msg":"foo","time":"2000-01-01T00:00:00Z"}` + "\n"
+	got := buf.String()
+	if expected != got {
 		t.Errorf("expected: %v, got: %v", expected, got)
 	}
 }
 
 func TestWithError(t *testing.T) {
-	got := make(map[string]interface{})
-	log := ctxlog.New(ctxlog.Printer(newTestEncoder(got)))
-	ctx := log.WithError(context.Background(), fmt.Errorf("bar error"))
+	buf := new(bytes.Buffer)
+	log := ctxlog.New(
+		ctxlog.ContextOptions(
+			ctxlog.Field("foo", "bar"),
+			ctxlog.Time(time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)),
+		),
+		ctxlog.Output(buf),
+	)
+	ctx := log.With(context.Background(), ctxlog.Error(fmt.Errorf("bar error")))
 
-	log.Info(ctx, "foo")
-	got["time"] = "now"
-	expected := map[string]interface{}{
-		"level": "info",
-		"msg":   "foo",
-		"time":  "now",
-		"error": "bar error",
-	}
+	log.Print(ctx, "foo")
 
-	if !reflect.DeepEqual(expected, got) {
+	expected := `{"error":"bar error","foo":"bar","msg":"foo","time":"2000-01-01T00:00:00Z"}` + "\n"
+	got := buf.String()
+	if expected != got {
 		t.Errorf("expected: %v, got: %v", expected, got)
 	}
 }
 
-func TestPrinter(t *testing.T) {
+func TestEncoderError(t *testing.T) {
 	buf := new(bytes.Buffer)
-	printer := ctxlog.DefaultPrinter(buf)
+	log := ctxlog.New(
+		ctxlog.ContextOptions(
+			ctxlog.Field("foo", "bar"),
+			ctxlog.Time(time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)),
+		),
+		ctxlog.Output(buf),
+	)
+	ctx := context.Background()
 
-	fields := map[string]interface{}{
-		"error": "some error",
-		"level": "info",
-		"msg":   "foo",
-		"time":  "now",
-	}
+	log.Print(ctx, "foo", ctxlog.Field("chan", make(chan struct{})))
 
-	printer(fields)
-	expected := `{"error":"some error","level":"info","msg":"foo","time":"now"}` + "\n"
+	expected := `{"error":"json: unsupported type: chan struct {}","msg":"ctxlog: json encode error","orig-msg":"foo","time":"2000-01-01T00:00:00Z"}` + "\n"
 	got := buf.String()
-
-	if expected != got {
-		t.Errorf("expected: %v, got: %v", expected, got)
-	}
-
-	buf.Reset()
-	fields["chan"] = make(chan string)
-	printer(fields)
-	expected = `{"error":"json: unsupported type: chan string","level":"error","msg":"ctxlog: json encode error","orig-msg":"foo","time":"now"}` + "\n"
-	got = buf.String()
-
 	if expected != got {
 		t.Errorf("expected: %v, got: %v", expected, got)
 	}
@@ -90,16 +75,14 @@ func TestNilLog(t *testing.T) {
 	ctx := context.Background()
 	var log *ctxlog.Log
 
-	log.Debug(ctx, "should not panic")
-	log.Info(ctx, "should not panic")
-	log.Error(ctx, "should not panic", fmt.Errorf("some err"))
+	log.Print(ctx, "should not panic")
 
 	if w := log.Writer(ctx); w != ioutil.Discard {
 		t.Errorf("expected discard writer, got %v", w)
 	}
 
-	nctx := log.WithField(ctx, "foo", "bar")
+	nctx := log.With(ctx, ctxlog.Field("foo", "bar"))
 	if ctx != nctx {
-		t.Errorf("WithField called on nil logger should have returned original context")
+		t.Errorf("With called on nil logger should have returned original context")
 	}
 }

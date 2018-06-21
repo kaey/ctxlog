@@ -3,45 +3,88 @@ package ctxlog
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"io"
 	"sync"
+	"time"
 )
 
-// PrinterFunc is called for every call to log Debug/Info/Debug/Fatal. It's job is to encode received fields and write them somewhere (see DefaultPrinter).
-// Must be safe for concurrent use.
-type PrinterFunc func(fields map[string]interface{})
-
-var bufPool = sync.Pool{
-	New: func() interface{} {
-		return new(bytes.Buffer)
-	},
+type printer struct {
+	bufPool sync.Pool
+	mu      sync.Mutex
+	w       io.Writer
 }
 
-// DefaultPrinter prints fields in json format to w.
-func DefaultPrinter(w io.Writer) PrinterFunc {
-	var mu sync.Mutex
-	return func(fields map[string]interface{}) {
-		buf := bufPool.Get().(*bytes.Buffer)
-		defer bufPool.Put(buf)
-		buf.Reset()
+func newPrinter(w io.Writer) *printer {
+	return &printer{
+		bufPool: sync.Pool{
+			New: func() interface{} {
+				return new(bytes.Buffer)
+			},
+		},
+		w: w,
+	}
+}
 
-		if err := json.NewEncoder(buf).Encode(fields); err != nil {
-			encErr := map[string]interface{}{
-				"time":     fmt.Sprint(fields["time"]),
-				"error":    err.Error(),
-				"msg":      "ctxlog: json encode error",
-				"orig-msg": fmt.Sprint(fields["msg"]),
-				"level":    levelError,
+func (p *printer) print(cd *ctxData, msg string) {
+	buf := p.bufPool.Get().(*bytes.Buffer)
+	defer p.bufPool.Put(buf)
+	buf.Reset()
+
+	m := make(map[string]interface{}, 10)
+
+	d := cd
+	for {
+		for _, co := range d.cos {
+			if _, exists := m[co.key]; exists {
+				continue
 			}
-			buf.Reset()
-			if err := json.NewEncoder(buf).Encode(encErr); err != nil {
-				panic(err)
+
+			switch co.key {
+			case "error":
+				err, ok := co.value.(error)
+				if ok {
+					m["error"] = err.Error()
+				}
+
+				st, ok := co.value.(Stacker)
+				if ok {
+					m["error-stack"] = stack(st)
+				}
+			case "time":
+				t, ok := co.value.(time.Time)
+				if ok {
+					m["time"] = t.UTC()
+				}
+			default:
+				m[co.key] = co.value
 			}
 		}
 
-		mu.Lock()
-		_, _ = w.Write(buf.Bytes())
-		mu.Unlock()
+		if d.prev == nil {
+			break
+		}
+		d = d.prev
 	}
+
+	m["msg"] = msg
+	if _, exists := m["time"]; !exists {
+		m["time"] = time.Now().UTC()
+	}
+
+	if err := json.NewEncoder(buf).Encode(m); err != nil {
+		encErr := map[string]interface{}{
+			"time":     m["time"],
+			"error":    err.Error(),
+			"msg":      "ctxlog: json encode error",
+			"orig-msg": m["msg"],
+		}
+		buf.Reset()
+		if err := json.NewEncoder(buf).Encode(encErr); err != nil {
+			panic(err)
+		}
+	}
+
+	p.mu.Lock()
+	_, _ = p.w.Write(buf.Bytes())
+	p.mu.Unlock()
 }
