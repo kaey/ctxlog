@@ -10,6 +10,7 @@ import (
 
 type printer struct {
 	bufPool sync.Pool
+	mapPool sync.Pool
 	mu      sync.Mutex
 	w       io.Writer
 }
@@ -21,42 +22,55 @@ func newPrinter(w io.Writer) *printer {
 				return new(bytes.Buffer)
 			},
 		},
+		mapPool: sync.Pool{
+			New: func() interface{} {
+				return make(map[string]interface{}, 10)
+			},
+		},
 		w: w,
 	}
 }
 
-func (p *printer) print(cd *ctxData, msg string) {
+func (p *printer) print(cd *ctxdata, msg string) {
 	buf := p.bufPool.Get().(*bytes.Buffer)
-	defer p.bufPool.Put(buf)
-	buf.Reset()
+	defer func() {
+		buf.Reset()
+		p.bufPool.Put(buf)
+	}()
 
-	m := make(map[string]interface{}, 10)
+	m := p.mapPool.Get().(map[string]interface{})
+	defer func() {
+		for k := range m {
+			delete(m, k)
+		}
+		p.mapPool.Put(m)
+	}()
 
 	d := cd
 	for {
-		for _, co := range d.cos {
-			if _, exists := m[co.key]; exists {
+		for _, f := range d.fields {
+			if _, exists := m[f.key]; exists {
 				continue
 			}
 
-			switch co.key {
+			switch f.key {
 			case "error":
-				err, ok := co.value.(error)
+				err, ok := f.value.(error)
 				if ok {
 					m["error"] = err.Error()
 				}
 
-				st, ok := co.value.(Stacker)
+				st, ok := f.value.(Stacker)
 				if ok {
 					m["error-stack"] = stack(st)
 				}
 			case "time":
-				t, ok := co.value.(time.Time)
+				t, ok := f.value.(time.Time)
 				if ok {
 					m["time"] = t.UTC()
 				}
 			default:
-				m[co.key] = co.value
+				m[f.key] = f.value
 			}
 		}
 

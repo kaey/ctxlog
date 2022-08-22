@@ -13,13 +13,7 @@ import (
 
 func TestPrintInfo(t *testing.T) {
 	buf := new(bytes.Buffer)
-	log := ctxlog.New(
-		ctxlog.ContextOptions(
-			ctxlog.Field("foo", "bar"),
-			ctxlog.Time(time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)),
-		),
-		ctxlog.Output(buf),
-	)
+	log := ctxlog.New(buf, ctxlog.Value("foo", "bar"), ctxlog.Time(time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)))
 	ctx := context.Background()
 
 	log.Print(ctx, "foo")
@@ -33,13 +27,7 @@ func TestPrintInfo(t *testing.T) {
 
 func TestWithError(t *testing.T) {
 	buf := new(bytes.Buffer)
-	log := ctxlog.New(
-		ctxlog.ContextOptions(
-			ctxlog.Field("foo", "bar"),
-			ctxlog.Time(time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)),
-		),
-		ctxlog.Output(buf),
-	)
+	log := ctxlog.New(buf, ctxlog.Value("foo", "bar"), ctxlog.Time(time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)))
 	ctx := log.With(context.Background(), ctxlog.Error(fmt.Errorf("bar error")))
 
 	log.Print(ctx, "foo")
@@ -53,16 +41,10 @@ func TestWithError(t *testing.T) {
 
 func TestEncoderError(t *testing.T) {
 	buf := new(bytes.Buffer)
-	log := ctxlog.New(
-		ctxlog.ContextOptions(
-			ctxlog.Field("foo", "bar"),
-			ctxlog.Time(time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)),
-		),
-		ctxlog.Output(buf),
-	)
+	log := ctxlog.New(buf, ctxlog.Value("foo", "bar"), ctxlog.Time(time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)))
 	ctx := context.Background()
 
-	log.Print(ctx, "foo", ctxlog.Field("chan", make(chan struct{})))
+	log.Print(ctx, "foo", ctxlog.Value("chan", make(chan struct{})))
 
 	expected := `{"error":"json: unsupported type: chan struct {}","msg":"ctxlog: json encode error","orig-msg":"foo","time":"2000-01-01T00:00:00Z"}` + "\n"
 	got := buf.String()
@@ -81,7 +63,7 @@ func TestNilLog(t *testing.T) {
 		t.Errorf("expected discard writer, got %v", w)
 	}
 
-	nctx := log.With(ctx, ctxlog.Field("foo", "bar"))
+	nctx := log.With(ctx, ctxlog.Value("foo", "bar"))
 	if ctx != nctx {
 		t.Errorf("With called on nil logger should have returned original context")
 	}
