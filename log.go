@@ -72,7 +72,9 @@ func Time(t time.Time) Field {
 	return Field{key: "time", value: t}
 }
 
-var ctxkey = struct{}{}
+type ctxkeytype struct{}
+
+var ctxkey = ctxkeytype{}
 
 type ctxdata struct {
 	prev   *ctxdata
@@ -135,4 +137,20 @@ func Print(ctx context.Context, msg string, fields ...Field) {
 
 func With(ctx context.Context, fields ...Field) context.Context {
 	return l.With(ctx, fields...)
+}
+
+func FieldFromContext[T any](ctx context.Context) *T {
+	cd, _ := ctx.Value(ctxkey).(*ctxdata)
+
+	for d := cd; d != nil; d = d.prev {
+		for _, f := range d.fields {
+			v, ok := f.value.(*T)
+			if !ok {
+				continue
+			}
+			return v
+		}
+	}
+
+	panic("ctxlog: value not found")
 }

@@ -3,6 +3,7 @@ package ctxlog
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"sync"
 	"time"
@@ -46,8 +47,7 @@ func (p *printer) print(cd *ctxdata, msg string) {
 		p.mapPool.Put(m)
 	}()
 
-	d := cd
-	for {
+	for d := cd; d != nil; d = d.prev {
 		for _, f := range d.fields {
 			if _, exists := m[f.key]; exists {
 				continue
@@ -60,8 +60,8 @@ func (p *printer) print(cd *ctxdata, msg string) {
 					m["error"] = err.Error()
 				}
 
-				st, ok := f.value.(Stacker)
-				if ok {
+				var st Stacker
+				if errors.As(err, &st) {
 					m["error-stack"] = stack(st)
 				}
 			case "time":
@@ -73,11 +73,6 @@ func (p *printer) print(cd *ctxdata, msg string) {
 				m[f.key] = f.value
 			}
 		}
-
-		if d.prev == nil {
-			break
-		}
-		d = d.prev
 	}
 
 	m["msg"] = msg
