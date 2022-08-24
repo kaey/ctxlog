@@ -9,42 +9,36 @@ import (
 	"time"
 )
 
-type printer struct {
-	bufPool sync.Pool
-	mapPool sync.Pool
-	mu      sync.Mutex
-	w       io.Writer
+var bufPool sync.Pool = sync.Pool{
+	New: func() interface{} {
+		return new(bytes.Buffer)
+	},
 }
 
-func newPrinter(w io.Writer) *printer {
-	return &printer{
-		bufPool: sync.Pool{
-			New: func() interface{} {
-				return new(bytes.Buffer)
-			},
-		},
-		mapPool: sync.Pool{
-			New: func() interface{} {
-				return make(map[string]interface{}, 10)
-			},
-		},
-		w: w,
-	}
+var mapPool sync.Pool = sync.Pool{
+	New: func() interface{} {
+		return make(map[string]interface{}, 10)
+	},
+}
+
+type printer struct {
+	mu sync.Mutex
+	w  io.Writer
 }
 
 func (p *printer) print(cd *ctxdata, msg string) {
-	buf := p.bufPool.Get().(*bytes.Buffer)
+	buf := bufPool.Get().(*bytes.Buffer)
 	defer func() {
 		buf.Reset()
-		p.bufPool.Put(buf)
+		bufPool.Put(buf)
 	}()
 
-	m := p.mapPool.Get().(map[string]interface{})
+	m := mapPool.Get().(map[string]interface{})
 	defer func() {
 		for k := range m {
 			delete(m, k)
 		}
-		p.mapPool.Put(m)
+		mapPool.Put(m)
 	}()
 
 	for d := cd; d != nil; d = d.prev {

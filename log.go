@@ -18,7 +18,7 @@ type Log struct {
 
 func New(w io.Writer, fields ...Field) *Log {
 	return &Log{
-		printer: newPrinter(w),
+		printer: &printer{w: w},
 		fields:  fields,
 	}
 }
@@ -131,14 +131,18 @@ func (w *writer) Write(p []byte) (n int, err error) {
 
 var l *Log = New(os.Stdout)
 
+// Print prints json line to stdout using msg and fields, as well as any fields stored in context.
 func Print(ctx context.Context, msg string, fields ...Field) {
 	l.Print(ctx, msg, fields...)
 }
 
+// With stores fields in context.
 func With(ctx context.Context, fields ...Field) context.Context {
 	return l.With(ctx, fields...)
 }
 
+// FieldFromContext returns field of specified type that was stored using With().
+// It panics if such type was not found.
 func FieldFromContext[T any](ctx context.Context) *T {
 	cd, _ := ctx.Value(ctxkey).(*ctxdata)
 
