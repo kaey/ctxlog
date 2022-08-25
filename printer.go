@@ -43,6 +43,9 @@ func (p *printer) print(cd *ctxdata, msg string) {
 
 	for d := cd; d != nil; d = d.prev {
 		for _, f := range d.fields {
+			if f.key == "" {
+				continue
+			}
 			if _, exists := m[f.key]; exists {
 				continue
 			}

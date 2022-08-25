@@ -64,6 +64,10 @@ func Value(k string, v interface{}) Field {
 	return Field{key: k, value: v}
 }
 
+func Hidden(v interface{}) Field {
+	return Field{value: v}
+}
+
 func Error(err error) Field {
 	return Field{key: "error", value: err}
 }
