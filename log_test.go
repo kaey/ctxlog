@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io/ioutil"
 	"testing"
 	"time"
 
@@ -16,9 +15,9 @@ func TestPrintInfo(t *testing.T) {
 	log := ctxlog.New(buf, ctxlog.Value("foo", "bar"), ctxlog.Time(time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)))
 	ctx := context.Background()
 
-	log.Print(ctx, "foo")
+	log.Print(ctx, "foo", ctxlog.Value("foo", "baz"))
 
-	expected := `{"foo":"bar","msg":"foo","time":"2000-01-01T00:00:00Z"}` + "\n"
+	expected := `{"foo":"baz","msg":"foo","time":"2000-01-01T00:00:00Z"}` + "\n"
 	got := buf.String()
 	if expected != got {
 		t.Errorf("expected: %v, got: %v", expected, got)
@@ -28,7 +27,7 @@ func TestPrintInfo(t *testing.T) {
 func TestWithError(t *testing.T) {
 	buf := new(bytes.Buffer)
 	log := ctxlog.New(buf, ctxlog.Value("foo", "bar"), ctxlog.Time(time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)))
-	ctx := log.With(context.Background(), ctxlog.Error(fmt.Errorf("bar error")))
+	ctx := ctxlog.With(context.Background(), ctxlog.Error(fmt.Errorf("bar error")))
 
 	log.Print(ctx, "foo")
 
@@ -46,7 +45,7 @@ func TestEncoderError(t *testing.T) {
 
 	log.Print(ctx, "foo", ctxlog.Value("chan", make(chan struct{})))
 
-	expected := `{"error":"json: unsupported type: chan struct {}","msg":"ctxlog: json encode error","orig-msg":"foo","time":"2000-01-01T00:00:00Z"}` + "\n"
+	expected := `{"error":"json: unsupported type: chan struct {}","msg":"ctxlog: json encode error","orig_msg":"foo","time":"2000-01-01T00:00:00Z"}` + "\n"
 	got := buf.String()
 	if expected != got {
 		t.Errorf("expected: %v, got: %v", expected, got)
@@ -58,13 +57,5 @@ func TestNilLog(t *testing.T) {
 	var log *ctxlog.Log
 
 	log.Print(ctx, "should not panic")
-
-	if w := log.Writer(ctx); w != ioutil.Discard {
-		t.Errorf("expected discard writer, got %v", w)
-	}
-
-	nctx := log.With(ctx, ctxlog.Value("foo", "bar"))
-	if ctx != nctx {
-		t.Errorf("With called on nil logger should have returned original context")
-	}
+	log.Writer(ctx).Write([]byte("should not panic either"))
 }

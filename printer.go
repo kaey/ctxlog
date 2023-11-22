@@ -4,45 +4,31 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"io"
 	"sync"
 	"time"
 )
 
 var bufPool sync.Pool = sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		return new(bytes.Buffer)
 	},
 }
 
 var mapPool sync.Pool = sync.Pool{
-	New: func() interface{} {
-		return make(map[string]interface{}, 10)
+	New: func() any {
+		return make(map[string]any, 10)
 	},
 }
 
-type printer struct {
-	mu sync.Mutex
-	w  io.Writer
-}
-
-func (p *printer) print(cd *ctxdata, msg string) {
-	buf := bufPool.Get().(*bytes.Buffer)
+func (l *Log) print(cd *ctxdata, msg string) {
+	m := mapPool.Get().(map[string]any)
 	defer func() {
-		buf.Reset()
-		bufPool.Put(buf)
-	}()
-
-	m := mapPool.Get().(map[string]interface{})
-	defer func() {
-		for k := range m {
-			delete(m, k)
-		}
+		clear(m)
 		mapPool.Put(m)
 	}()
 
-	for d := cd; d != nil; d = d.prev {
-		for _, f := range d.fields {
+	handleFields := func(fs []Field) {
+		for _, f := range fs {
 			if f.key == "" {
 				continue
 			}
@@ -52,37 +38,49 @@ func (p *printer) print(cd *ctxdata, msg string) {
 
 			switch f.key {
 			case "error":
-				err, ok := f.value.(error)
+				err, ok := f.val.(error)
 				if ok {
 					m["error"] = err.Error()
 				}
 
 				var st Stacker
 				if errors.As(err, &st) {
-					m["error-stack"] = stack(st)
+					m["error_stack"] = stack(st)
 				}
 			case "time":
-				t, ok := f.value.(time.Time)
+				t, ok := f.val.(time.Time)
 				if ok {
 					m["time"] = t.UTC()
 				}
 			default:
-				m[f.key] = f.value
+				m[f.key] = f.val
 			}
 		}
 	}
 
+	for d := cd; d != nil; d = d.prev {
+		handleFields(d.fields)
+	}
+	handleFields(l.fields)
+
 	m["msg"] = msg
-	if _, exists := m["time"]; !exists {
+	if _, ok := m["time"].(time.Time); !ok {
 		m["time"] = time.Now().UTC()
 	}
 
+	buf := bufPool.Get().(*bytes.Buffer)
+	defer func() {
+		buf.Reset()
+		bufPool.Put(buf)
+	}()
+
 	if err := json.NewEncoder(buf).Encode(m); err != nil {
-		encErr := map[string]interface{}{
-			"time":     m["time"],
+		t := m["time"].(time.Time)
+		encErr := map[string]string{
+			"time":     t.Format(time.RFC3339),
 			"error":    err.Error(),
 			"msg":      "ctxlog: json encode error",
-			"orig-msg": m["msg"],
+			"orig_msg": msg,
 		}
 		buf.Reset()
 		if err := json.NewEncoder(buf).Encode(encErr); err != nil {
@@ -90,7 +88,7 @@ func (p *printer) print(cd *ctxdata, msg string) {
 		}
 	}
 
-	p.mu.Lock()
-	_, _ = p.w.Write(buf.Bytes())
-	p.mu.Unlock()
+	l.mu.Lock()
+	_, _ = buf.WriteTo(l.w)
+	l.mu.Unlock()
 }

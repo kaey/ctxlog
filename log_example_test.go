@@ -21,7 +21,7 @@ func ExampleLog_Print_error() {
 	log := ctxlog.New(os.Stdout)
 	ctx := context.Background()
 
-	ctx = log.With(ctx, ctxlog.Value("foo", "bar"), ctxlog.Time(time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)))
-	log.Print(ctx, "hello again world", ctxlog.Error(fmt.Errorf("broken pipe")))
-	// Output: {"error":"broken pipe","foo":"bar","msg":"hello again world","time":"2000-01-01T00:00:00Z"}
+	ctx = ctxlog.With(ctx, ctxlog.Value("foo", "bar"), ctxlog.Time(time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)))
+	log.Print(ctx, "read error", ctxlog.Error(fmt.Errorf("broken pipe")))
+	// Output: {"error":"broken pipe","foo":"bar","msg":"read error","time":"2000-01-01T00:00:00Z"}
 }

@@ -6,20 +6,48 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
 	"runtime"
+	"sync"
 	"time"
 )
 
+var log *Log
+
+func Global(l *Log) {
+	log = l
+}
+
+// Print prints json line with Global logger using msg and fields, as well as any fields stored in context.
+func Print(ctx context.Context, msg string, fields ...Field) {
+	log.Print(ctx, msg, fields...)
+}
+
+// Writer returns io.Writer for Global logger which calls l.Print for every write to it.
+func Writer(ctx context.Context) io.Writer {
+	return log.Writer(ctx)
+}
+
+// With returns new context with specified fields added to it.
+func With(ctx context.Context, fields ...Field) context.Context {
+	if len(fields) == 0 {
+		return ctx
+	}
+
+	cd, _ := ctx.Value(ctxkey).(*ctxdata)
+	return context.WithValue(ctx, ctxkey, &ctxdata{prev: cd, fields: fields})
+}
+
 type Log struct {
-	printer *printer
-	fields  []Field
+	fields []Field
+
+	mu sync.Mutex
+	w  io.Writer
 }
 
 func New(w io.Writer, fields ...Field) *Log {
 	return &Log{
-		printer: &printer{w: w},
-		fields:  fields,
+		fields: fields,
+		w:      w,
 	}
 }
 
@@ -29,77 +57,26 @@ func (l *Log) Print(ctx context.Context, msg string, fields ...Field) {
 		return
 	}
 
-	cd := l.newCtxData(ctx, fields)
-	l.printer.print(cd, msg)
-}
-
-// With returns new context with specified fields added to it.
-func (l *Log) With(ctx context.Context, fields ...Field) context.Context {
-	if l == nil || len(fields) == 0 {
-		return ctx
-	}
-
-	cd := l.newCtxData(ctx, fields)
-	return context.WithValue(ctx, ctxkey, cd)
+	cd, _ := ctx.Value(ctxkey).(*ctxdata)
+	l.print(&ctxdata{prev: cd, fields: fields}, msg)
 }
 
 // Writer returns io.Writer which calls l.Print for every write to it.
 func (l *Log) Writer(ctx context.Context) io.Writer {
-	if l == nil {
-		return io.Discard
-	}
-
 	return &writer{
 		l:   l,
 		ctx: ctx,
 	}
 }
 
-type Field struct {
-	key   string
-	value interface{}
+type writer struct {
+	l   *Log
+	ctx context.Context
 }
 
-func Value(k string, v interface{}) Field {
-	return Field{key: k, value: v}
-}
-
-func Hidden(v interface{}) Field {
-	return Field{value: v}
-}
-
-func Error(err error) Field {
-	return Field{key: "error", value: err}
-}
-
-func Time(t time.Time) Field {
-	return Field{key: "time", value: t}
-}
-
-type ctxkeytype struct{}
-
-var ctxkey = ctxkeytype{}
-
-type ctxdata struct {
-	prev   *ctxdata
-	fields []Field
-}
-
-func (l *Log) newCtxData(ctx context.Context, fields []Field) *ctxdata {
-	cd, ok := ctx.Value(ctxkey).(*ctxdata)
-	if !ok {
-		return &ctxdata{
-			prev: &ctxdata{
-				fields: l.fields,
-			},
-			fields: fields,
-		}
-	}
-
-	return &ctxdata{
-		prev:   cd,
-		fields: fields,
-	}
+func (w *writer) Write(p []byte) (n int, err error) {
+	w.l.Print(w.ctx, string(bytes.TrimSpace(p)))
+	return len(p), nil
 }
 
 // Stacker can be implemented by errors to include stack trace info in logs.
@@ -116,49 +93,33 @@ func stack(v Stacker) []string {
 		st = append(st, fmt.Sprintf("%s:%d[%s]", frame.File, frame.Line, frame.Func.Name()))
 
 		if !more {
-			break
+			return st
 		}
 	}
-
-	return st
 }
 
-type writer struct {
-	l   *Log
-	ctx context.Context
+type Field struct {
+	key string
+	val any
 }
 
-func (w *writer) Write(p []byte) (n int, err error) {
-	w.l.Print(w.ctx, string(bytes.TrimSpace(p)))
-	return len(p), nil
+func Value(k string, v any) Field {
+	return Field{key: k, val: v}
 }
 
-var l *Log = New(os.Stdout)
-
-// Print prints json line to stdout using msg and fields, as well as any fields stored in context.
-func Print(ctx context.Context, msg string, fields ...Field) {
-	l.Print(ctx, msg, fields...)
+func Error(err error) Field {
+	return Field{key: "error", val: err}
 }
 
-// With stores fields in context.
-func With(ctx context.Context, fields ...Field) context.Context {
-	return l.With(ctx, fields...)
+func Time(t time.Time) Field {
+	return Field{key: "time", val: t}
 }
 
-// FieldFromContext returns field of specified type that was stored using With().
-// It panics if such type was not found.
-func FieldFromContext[T any](ctx context.Context) *T {
-	cd, _ := ctx.Value(ctxkey).(*ctxdata)
+type ctxkeytype struct{}
 
-	for d := cd; d != nil; d = d.prev {
-		for _, f := range d.fields {
-			v, ok := f.value.(*T)
-			if !ok {
-				continue
-			}
-			return v
-		}
-	}
+var ctxkey = ctxkeytype{}
 
-	panic("ctxlog: value not found")
+type ctxdata struct {
+	prev   *ctxdata
+	fields []Field
 }

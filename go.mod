@@ -1,3 +1,3 @@
 module github.com/kaey/ctxlog
 
-go 1.18
+go 1.21
