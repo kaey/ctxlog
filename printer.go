@@ -88,7 +88,5 @@ func (l *Log) print(cd *ctxdata, msg string) {
 		}
 	}
 
-	l.mu.Lock()
-	_, _ = buf.WriteTo(l.w)
-	l.mu.Unlock()
+	buf.WriteTo(l.w)
 }

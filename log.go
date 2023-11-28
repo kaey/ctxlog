@@ -39,9 +39,7 @@ func With(ctx context.Context, fields ...Field) context.Context {
 
 type Log struct {
 	fields []Field
-
-	mu sync.Mutex
-	w  io.Writer
+	w      io.Writer
 }
 
 func New(w io.Writer, fields ...Field) *Log {
@@ -122,4 +120,19 @@ var ctxkey = ctxkeytype{}
 type ctxdata struct {
 	prev   *ctxdata
 	fields []Field
+}
+
+func MuWriter(w io.Writer) io.Writer {
+	return &muWriter{w: w}
+}
+
+type muWriter struct {
+	mu sync.Mutex
+	w  io.Writer
+}
+
+func (w *muWriter) Write(p []byte) (n int, err error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.w.Write(p)
 }
